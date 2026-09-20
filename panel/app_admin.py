@@ -89,11 +89,14 @@ class AppAdmin(tk.Toplevel):
             ("Películas", [
                 ("Ver catálogo", self._v_ver_peliculas, "morado"),
                 ("Alta de película", self._v_alta_pelicula, "morado"),
+                ("Editar película", self._v_editar_pelicula, "morado"),
                 ("Dar de baja", self._v_baja_pelicula, "morado"),
             ]),
             ("Funciones", [
                 ("Ver funciones", self._v_ver_funciones, "cian"),
                 ("Alta de función", self._v_alta_funcion, "cian"),
+                ("Ver asientos por función", self._v_asientos_funcion,
+                 "cian"),
             ]),
             ("Ventas", [
                 ("Ver todas las ventas", self._v_ventas, "verde"),
@@ -197,6 +200,70 @@ class AppAdmin(tk.Toplevel):
 
         theme.boton(win, "Dar de baja", hacer, "rojo", ancho=16).pack(pady=6)
 
+    def _v_editar_pelicula(self):
+        win = self._nueva_ventana("Editar película", 480, 440)
+        pelis = self.servicio.listar_peliculas(solo_activas=False)
+        if not pelis:
+            aviso(win, "No hay películas para editar.")
+            return
+        form = theme.marco(win, relleno=16)
+        form.pack(fill="x", padx=16, pady=12)
+
+        cb = theme.combobox(
+            form, [f"#{p.id} · {p.titulo}" for p in pelis], 40)
+        en_titulo = theme.entrada(form, 36)
+        en_genero = theme.entrada(form, 36)
+        en_duracion = theme.entrada(form, 16)
+        en_precio = theme.entrada(form, 16)
+        cb_clas = theme.combobox(form, sorted(CLASIFICACION_EDAD), 10)
+
+        campos = [("Película a editar", cb), ("Título", en_titulo),
+                  ("Género", en_genero), ("Duración (min)", en_duracion),
+                  ("Precio base", en_precio), ("Clasificación", cb_clas)]
+        for i, (texto, widget) in enumerate(campos):
+            tk.Label(form, text=texto, bg=T["panel"], fg=T["morado"],
+                     font=theme.ETIQUETA).grid(row=i, column=0, sticky="w",
+                                               pady=3)
+            widget.grid(row=i, column=1, sticky="we", padx=6)
+        form.columnconfigure(1, weight=1)
+
+        def elegida(_e=None):
+            if not cb.get():
+                return
+            pid = int(cb.get().split("·")[0].strip().lstrip("#"))
+            p = self.servicio.obtener_pelicula(pid)
+            if p is None:
+                return
+            en_titulo.delete(0, "end")
+            en_genero.delete(0, "end")
+            en_duracion.delete(0, "end")
+            en_precio.delete(0, "end")
+            en_titulo.insert(0, p.titulo)
+            en_genero.insert(0, p.genero)
+            en_duracion.insert(0, str(p.duracion_min))
+            en_precio.insert(0, f"{p.precio_base:.2f}")
+            cb_clas.set(p.clasificacion)
+
+        cb.bind("<<ComboboxSelected>>", elegida)
+
+        def guardar():
+            try:
+                pid = int(cb.get().split("·")[0].strip().lstrip("#"))
+                p = self.servicio.editar_pelicula(
+                    pid, en_titulo.get(), en_genero.get(),
+                    _entero(en_duracion, "La duración"),
+                    cb_clas.get(), _precio(en_precio, "El precio"))
+                aviso(win,
+                      f"Película '{p.titulo}' actualizada.", True)
+                cb["values"] = [
+                    f"#{x.id} · {x.titulo}" for x in
+                    self.servicio.listar_peliculas(solo_activas=False)]
+            except (ErrorNegocio, ValueError) as e:
+                aviso(win, str(e), False)
+
+        theme.boton(form, "Guardar cambios", guardar, "morado", ancho=18).grid(
+            row=len(campos), column=0, columnspan=2, pady=10)
+
     # ---------------------------------------------------------------- #
     #                          Funciones                                #
     # ---------------------------------------------------------------- #
@@ -252,6 +319,50 @@ class AppAdmin(tk.Toplevel):
 
         theme.boton(form, "Guardar", guardar, "cian", ancho=16).grid(
             row=len(campos), column=0, columnspan=2, pady=10)
+
+    def _v_asientos_funcion(self):
+        win = self._nueva_ventana("Asientos por función", 720, 700)
+        funciones = self.servicio.listar_funciones(
+            solo_pelicula_activa=False)
+        if not funciones:
+            aviso(win, "No hay funciones registradas.")
+            return
+
+        def etiqueta(f):
+            p = self.servicio.obtener_pelicula(f.pelicula_id)
+            return f"#{f.id} · {p.titulo} · {f.sala} · {f.horario} · " \
+                   f"{f.disponibles} libres"
+
+        cb = theme.combobox(win, [etiqueta(f) for f in funciones], 50)
+        cb.pack(padx=16, pady=8)
+
+        zona_mapa = tk.Frame(win, bg=T["panel"])
+        zona_mapa.pack(padx=16, pady=(4, 0))
+
+        def cargar():
+            for w in zona_mapa.winfo_children():
+                w.destroy()
+            if not cb.get():
+                return
+            fid = int(cb.get().split("·")[0].strip().lstrip("#"))
+            asientos = self.servicio.listar_asientos(fid)
+            filas = []
+            actual = None
+            for a in asientos:
+                if actual is None or actual["letra"] != a["fila"]:
+                    actual = {"letra": a["fila"], "asientos": []}
+                    filas.append(actual)
+                actual["asientos"].append(a)
+            libres = sum(1 for a in asientos if a["estado"] == "libre")
+            theme.mapa_asientos(zona_mapa, filas, solo_lectura=True)
+            theme.panel_info(zona_mapa,
+                             f"{libres} libre(s) · "
+                             f"{len(asientos) - libres} ocupado(s)").pack()
+
+        cb.bind("<<ComboboxSelected>>", lambda _e: cargar())
+
+        theme.boton(win, "Cerrar", win.destroy, "panel", ancho=14).pack(
+            pady=10)
 
     # ---------------------------------------------------------------- #
     #                           Ventas                                  #

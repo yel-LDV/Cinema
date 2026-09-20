@@ -40,8 +40,26 @@ CREATE TABLE IF NOT EXISTS ventas (
     estado TEXT NOT NULL DEFAULT 'activa' CHECK (estado IN ('activa', 'cancelada'))
 );
 
+CREATE TABLE IF NOT EXISTS asientos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    funcion_id INTEGER NOT NULL REFERENCES funciones(id),
+    posicion TEXT NOT NULL,
+    fila TEXT NOT NULL,
+    numero INTEGER NOT NULL CHECK (numero > 0),
+    estado TEXT NOT NULL DEFAULT 'libre' CHECK (estado IN ('libre', 'ocupado')),
+    UNIQUE (funcion_id, posicion)
+);
+
+CREATE TABLE IF NOT EXISTS ventas_asientos (
+    venta_id INTEGER NOT NULL REFERENCES ventas(id),
+    asiento_id INTEGER NOT NULL REFERENCES asientos(id),
+    PRIMARY KEY (venta_id, asiento_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_funciones_pelicula ON funciones(pelicula_id);
 CREATE INDEX IF NOT EXISTS idx_ventas_funcion ON ventas(funcion_id);
+CREATE INDEX IF NOT EXISTS idx_asientos_funcion ON asientos(funcion_id);
+CREATE INDEX IF NOT EXISTS idx_ventas_asientos_asiento ON ventas_asientos(asiento_id);
 """
 
 
@@ -56,8 +74,22 @@ def conexion(ruta=None):
 
 
 def inicializar_db(ruta=None):
-    """Crea el esquema si no existe y devuelve la conexión."""
+    """Crea el esquema si no existe y devuelve la conexión.
+
+    Las bases legadas del esquema anterior (sin la tabla 'asientos') se
+    reinician por completo: al ser una BD demo no se conserva la información
+    antigua y el catálogo se vuelve a sembrar desde cero.
+    """
     conn = conexion(ruta)
+    tiene_asientos = conn.execute(
+        "SELECT COUNT(*) FROM sqlite_master "
+        "WHERE type = 'table' AND name = 'asientos'"
+    ).fetchone()[0]
+    if not tiene_asientos:
+        for nombre in ("ventas_asientos", "asientos", "ventas",
+                       "funciones", "peliculas"):
+            conn.execute(f"DROP TABLE IF EXISTS {nombre}")
+        conn.commit()
     conn.executescript(ESQUEMA)
     conn.commit()
     return conn

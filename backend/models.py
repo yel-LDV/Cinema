@@ -1,5 +1,6 @@
 """Clases de dominio y servicio central (reglas de negocio) del cine."""
 
+import re
 from datetime import datetime
 
 from backend.database import RUTA_DB, inicializar_db
@@ -25,6 +26,9 @@ CLASIFICACION_EDAD = {
 }
 EDAD_MIN_DESCONOCIDA = 0
 
+# Disposición del salón: asientos por fila (filas A, B, C… con pasillo central).
+SEATS_POR_FILA = 8
+
 
 class ErrorNegocio(Exception):
     """Error en una regla de negocio; su mensaje es apto para el usuario."""
@@ -42,6 +46,51 @@ def calcular_descuento_por_edad(edad, reglas=None):
 def edad_minima_clasificacion(clasificacion, mapa=None):
     mapa = mapa if mapa is not None else CLASIFICACION_EDAD
     return mapa.get(clasificacion, EDAD_MIN_DESCONOCIDA)
+
+
+def _normalizar_posicion(posicion):
+    """Normaliza una posición de asiento a mayúsculas (ej. 'f-5' → 'F-5')."""
+    posicion = posicion.strip().upper()
+    if not re.fullmatch(r"[A-Z]+-\d+", posicion):
+        raise ErrorNegocio(
+            f"Posición de asiento no válida: {posicion!r}. Usa formato F-5.")
+    return posicion
+
+
+def _validar_hhmm(horario):
+    """Valida y normaliza un horario 'HH:MM' (24 h)."""
+    horario = horario.strip()
+    if not re.fullmatch(r"\d{2}:\d{2}", horario):
+        raise ErrorNegocio("El horario debe tener formato HH:MM (24 h).")
+    h, m = horario.split(":")
+    if int(h) > 23 or int(m) > 59:
+        raise ErrorNegocio("El horario debe ser una hora válida (00:00–23:59).")
+    return f"{int(h):02d}:{int(m):02d}"
+
+
+def _a_minutos(horario):
+    h, m = horario.split(":")
+    return int(h) * 60 + int(m)
+
+
+def _hora_texto(minutos):
+    h, m = divmod(minutos % (24 * 60), 60)
+    return f"{h:02d}:{m:02d}"
+
+
+def _generar_disposicion(capacidad, por_fila=SEATS_POR_FILA):
+    """Devuelve lista de (fila, número) para una sala con 'capacidad' asientos."""
+    resultado = []
+    letra_idx = 0
+    resto = capacidad
+    while resto > 0:
+        n = min(por_fila, resto)
+        letra = chr(ord("A") + letra_idx)
+        for i in range(1, n + 1):
+            resultado.append((letra, i))
+        resto -= n
+        letra_idx += 1
+    return resultado
 
 
 class Pelicula:
@@ -144,12 +193,13 @@ class CineService:
     def __init__(self, ruta_db=None):
         self.ruta_db = ruta_db or RUTA_DB
         self.conn = inicializar_db(self.ruta_db)
+        self._crear_asientos_faltantes()
 
     # ------------------------------------------------------------------ #
     #                           Películas                                #
     # ------------------------------------------------------------------ #
-    def crear_pelicula(self, titulo, genero, duracion_min, clasificacion,
-                       precio_base):
+    def _validar_datos_pelicula(self, titulo, genero, duracion_min,
+                                clasificacion, precio_base):
         if not titulo.strip():
             raise ErrorNegocio("El título no puede estar vacío.")
         if not genero.strip():
@@ -159,15 +209,36 @@ class CineService:
         if precio_base < 0:
             raise ErrorNegocio("El precio no puede ser negativo.")
         if clasificacion not in CLASIFICACION_EDAD:
-            raise ErrorNegocio(
-                f"Clasificación desconocida: {clasificacion}.")
+            raise ErrorNegocio(f"Clasificación desconocida: {clasificacion}.")
+        return titulo.strip(), genero.strip()
+
+    def crear_pelicula(self, titulo, genero, duracion_min, clasificacion,
+                       precio_base):
+        titulo, genero = self._validar_datos_pelicula(
+            titulo, genero, duracion_min, clasificacion, precio_base)
         cur = self.conn.execute(
             "INSERT INTO peliculas (titulo, genero, duracion_min, "
             "clasificacion, precio_base, activa) VALUES (?, ?, ?, ?, ?, 1)",
-            (titulo.strip(), genero.strip(), duracion_min, clasificacion,
-             precio_base))
+            (titulo, genero, duracion_min, clasificacion, precio_base))
         self.conn.commit()
         return self.obtener_pelicula(cur.lastrowid)
+
+    def editar_pelicula(self, pelicula_id, titulo, genero, duracion_min,
+                        clasificacion, precio_base):
+        """Actualiza la película; rechaza cambios de duración que solapen
+        funciones ya programadas."""
+        if self.obtener_pelicula(pelicula_id) is None:
+            raise ErrorNegocio("Película no encontrada.")
+        titulo, genero = self._validar_datos_pelicula(
+            titulo, genero, duracion_min, clasificacion, precio_base)
+        with self.conn:
+            self.conn.execute(
+                "UPDATE peliculas SET titulo=?, genero=?, duracion_min=?, "
+                "clasificacion=?, precio_base=? WHERE id=?",
+                (titulo, genero, duracion_min, clasificacion, precio_base,
+                 pelicula_id))
+            self._verificar_solapamientos_pelicula(pelicula_id, duracion_min)
+        return self.obtener_pelicula(pelicula_id)
 
     def dar_de_baja_pelicula(self, pelicula_id):
         peli = self.obtener_pelicula(pelicula_id)
@@ -198,20 +269,74 @@ class CineService:
     #                           Funciones                                #
     # ------------------------------------------------------------------ #
     def crear_funcion(self, pelicula_id, sala, horario, capacidad):
-        if self.obtener_pelicula(pelicula_id) is None:
+        pelicula = self.obtener_pelicula(pelicula_id)
+        if pelicula is None:
             raise ErrorNegocio("La película no existe.")
         if not sala.strip():
             raise ErrorNegocio("La sala no puede estar vacía.")
-        if not horario.strip():
-            raise ErrorNegocio("El horario no puede estar vacío.")
         if capacidad <= 0:
             raise ErrorNegocio("La capacidad debe ser mayor a cero.")
-        cur = self.conn.execute(
-            "INSERT INTO funciones (pelicula_id, sala, horario, capacidad, "
-            "ocupados) VALUES (?, ?, ?, ?, 0)",
-            (pelicula_id, sala.strip(), horario.strip(), capacidad))
-        self.conn.commit()
-        return self.obtener_funcion(cur.lastrowid)
+        horario = _validar_hhmm(horario)
+        sala = sala.strip()
+        self._revisar_solapamiento_sala(sala, horario,
+                                        pelicula.duracion_min)
+        with self.conn:
+            cur = self.conn.execute(
+                "INSERT INTO funciones (pelicula_id, sala, horario, "
+                "capacidad, ocupados) VALUES (?, ?, ?, ?, 0)",
+                (pelicula_id, sala, horario, capacidad))
+            funcion_id = cur.lastrowid
+            self._crear_asientos(funcion_id, capacidad)
+        return self.obtener_funcion(funcion_id)
+
+    def _revisar_solapamiento_sala(self, sala, horario, duracion_min,
+                                   excepto_funcion_id=None):
+        """Levanta ErrorNegocio si la sala ya tiene una función solapada."""
+        filas = self.conn.execute(
+            "SELECT f.id, f.horario, p.duracion_min, p.titulo "
+            "FROM funciones f "
+            "JOIN peliculas p ON p.id = f.pelicula_id "
+            "WHERE f.sala = ? AND (? IS NULL OR f.id <> ?)",
+            (sala, excepto_funcion_id, excepto_funcion_id)).fetchall()
+        inicio = _a_minutos(horario)
+        fin = inicio + duracion_min
+        for f in filas:
+            i_viejo = _a_minutos(f["horario"])
+            f_viejo = i_viejo + f["duracion_min"]
+            if inicio < f_viejo and i_viejo < fin:
+                raise ErrorNegocio(
+                    f"Conflicto de horario en {sala}: la función de "
+                    f"'{f['titulo']}' empieza a las {f['horario']} y ocupa "
+                    f"la sala hasta las {_hora_texto(f_viejo)}.")
+
+    def _verificar_solapamientos_pelicula(self, pelicula_id, duracion_min):
+        """Tras editar la duración, verifica que ninguna función de la
+        película quede solapada en su sala."""
+        funciones = self.conn.execute(
+            "SELECT id, sala, horario FROM funciones "
+            "WHERE pelicula_id = ?", (pelicula_id,)).fetchall()
+        for f in funciones:
+            self._revisar_solapamiento_sala(f["sala"], f["horario"],
+                                            duracion_min,
+                                            excepto_funcion_id=f["id"])
+
+    def _crear_asientos(self, funcion_id, capacidad):
+        for fila, numero in _generar_disposicion(capacidad):
+            posicion = f"{fila}-{numero}"
+            self.conn.execute(
+                "INSERT INTO asientos (funcion_id, posicion, fila, numero, "
+                "estado) VALUES (?, ?, ?, ?, 'libre')",
+                (funcion_id, posicion, fila, numero))
+
+    def _crear_asientos_faltantes(self):
+        """Migración: garantiza asientos para funciones creadas sin ellos."""
+        faltantes = self.conn.execute(
+            "SELECT f.id, f.capacidad FROM funciones f WHERE NOT EXISTS "
+            "(SELECT 1 FROM asientos a WHERE a.funcion_id = f.id)").fetchall()
+        for f in faltantes:
+            self._crear_asientos(f["id"], f["capacidad"])
+        if faltantes:
+            self.conn.commit()
 
     def obtener_funcion(self, funcion_id):
         fila = self.conn.execute(
@@ -226,7 +351,7 @@ class CineService:
         if pelicula_id is not None:
             sql += " WHERE f.pelicula_id = ?"
             params.append(pelicula_id)
-        sql += " ORDER BY f.horario"
+        sql += " ORDER BY f.sala, f.horario"
         return [Funcion.desde_fila(f)
                 for f in self.conn.execute(sql, params).fetchall()]
 
@@ -237,12 +362,40 @@ class CineService:
         return funcion.disponibles
 
     # ------------------------------------------------------------------ #
+    #                           Asientos                                 #
+    # ------------------------------------------------------------------ #
+    def listar_asientos(self, funcion_id):
+        """Asientos de una función ordenados por fila y número."""
+        if self.obtener_funcion(funcion_id) is None:
+            raise ErrorNegocio("Función no encontrada.")
+        filas = self.conn.execute(
+            "SELECT id, fila, numero, posicion, estado FROM asientos "
+            "WHERE funcion_id = ? ORDER BY fila, numero",
+            (funcion_id,)).fetchall()
+        return [dict(f) for f in filas]
+
+    def posiciones_libres(self, funcion_id, n):
+        """Primeras n posiciones libres (para pruebas y sugerencias)."""
+        filas = self.conn.execute(
+            "SELECT posicion FROM asientos WHERE funcion_id = ? "
+            "AND estado = 'libre' ORDER BY fila, numero LIMIT ?",
+            (funcion_id, n)).fetchall()
+        return [f["posicion"] for f in filas]
+
+    # ------------------------------------------------------------------ #
     #                           Compras                                  #
     # ------------------------------------------------------------------ #
-    def comprar_boletos(self, funcion_id, cliente, cantidad):
-        """Registra la venta y actualiza los lugares ocupados, atómicamente."""
-        if cantidad <= 0:
-            raise ErrorNegocio("La cantidad de boletos debe ser mayor a cero.")
+    def comprar_boletos(self, funcion_id, cliente, posiciones):
+        """Registra la venta de asientos concretos, atómicamente.
+
+        Posiciones: lista como ['F-5', 'F-6']. Cada asiento debe existir y
+        estar libre; el mismo asiento nunca se vende dos veces.
+        """
+        if not posiciones:
+            raise ErrorNegocio("Selecciona al menos un asiento.")
+        posiciones = [_normalizar_posicion(p) for p in posiciones]
+        if len(set(posiciones)) != len(posiciones):
+            raise ErrorNegocio("No puedes repetir un asiento en la compra.")
         funcion = self.obtener_funcion(funcion_id)
         if funcion is None:
             raise ErrorNegocio("Función no encontrada.")
@@ -255,17 +408,23 @@ class CineService:
             raise ErrorNegocio(
                 f"Clasificación {pelicula.clasificacion}: esta función "
                 f"requiere edad mínima de {minimo} años.")
-        # Re-leer la función dentro de la transacción para ver la disponibilidad
-        with self.conn:
-            fresca = self.conn.execute(
-                "SELECT * FROM funciones WHERE id = ?",
-                (funcion_id,)).fetchone()
-            funcion = Funcion.desde_fila(fresca)
-            if cantidad > funcion.disponibles:
-                raise ErrorNegocio(
-                    f"Solo hay {funcion.disponibles} lugares disponibles; "
-                    f"solicitó {cantidad}.")
 
+        with self.conn:
+            marcas = ", ".join("?" * len(posiciones))
+            filas = self.conn.execute(
+                f"SELECT * FROM asientos WHERE funcion_id = ? "
+                f"AND posicion IN ({marcas})",
+                (funcion_id, *posiciones)).fetchall()
+            if len(filas) != len(posiciones):
+                raise ErrorNegocio(
+                    "Uno o más asientos no existen en esta función.")
+            ocupados = [f["posicion"] for f in filas
+                        if f["estado"] != "libre"]
+            if ocupados:
+                raise ErrorNegocio(
+                    f"El asiento {ocupados[0]} ya está ocupado.")
+
+            cantidad = len(filas)
             descuento = cliente.calcular_descuento()
             precio_unitario = pelicula.precio_base
             total = round(cantidad * precio_unitario * (1 - descuento), 2)
@@ -278,6 +437,13 @@ class CineService:
                 (folio, funcion_id, cliente.nombre, cliente.edad, cantidad,
                  precio_unitario, descuento, total,
                  datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+            for f in filas:
+                self.conn.execute(
+                    "INSERT INTO ventas_asientos (venta_id, asiento_id) "
+                    "VALUES (?, ?)", (cur.lastrowid, f["id"]))
+                self.conn.execute(
+                    "UPDATE asientos SET estado = 'ocupado' WHERE id = ?",
+                    (f["id"],))
             self.conn.execute(
                 "UPDATE funciones SET ocupados = ocupados + ? WHERE id = ?",
                 (cantidad, funcion_id))
@@ -289,7 +455,7 @@ class CineService:
         return f"V{fila['n'] + 1:05d}"
 
     def cancelar_compra(self, folio):
-        """Cancela la venta (solo una vez) y libera los lugares ocupados."""
+        """Cancela la venta (solo una vez) y libera sus asientos."""
         folio = folio.strip()
         venta = self.obtener_venta_por_folio(folio)
         if venta is None:
@@ -297,6 +463,13 @@ class CineService:
         if venta.estado == "cancelada":
             raise ErrorNegocio("La venta ya está cancelada.")
         with self.conn:
+            asientos = self.conn.execute(
+                "SELECT asiento_id FROM ventas_asientos WHERE venta_id = ?",
+                (venta.id,)).fetchall()
+            for a in asientos:
+                self.conn.execute(
+                    "UPDATE asientos SET estado = 'libre' WHERE id = ?",
+                    (a["asiento_id"],))
             self.conn.execute(
                 "UPDATE ventas SET estado = 'cancelada' WHERE id = ?",
                 (venta.id,))
@@ -308,6 +481,12 @@ class CineService:
     # ------------------------------------------------------------------ #
     #                           Ventas                                   #
     # ------------------------------------------------------------------ #
+    _COLUMNA_ASIENTOS = (
+        "(SELECT GROUP_CONCAT(posicion, ', ') FROM ("
+        "SELECT a.posicion FROM ventas_asientos va "
+        "JOIN asientos a ON a.id = va.asiento_id "
+        "WHERE va.venta_id = v.id ORDER BY a.fila, a.numero)) AS asientos")
+
     def obtener_venta_por_id(self, venta_id):
         fila = self.conn.execute(
             "SELECT * FROM ventas WHERE id = ?", (venta_id,)).fetchone()
@@ -319,9 +498,9 @@ class CineService:
         return Venta.desde_fila(fila) if fila else None
 
     def ventas_detalladas(self, estado=None):
-        """Ventas enriquecidas con película, sala y horario."""
+        """Ventas enriquecidas con película, sala, horario y asientos."""
         sql = ("SELECT v.*, f.sala, f.horario, p.titulo AS pelicula_titulo, "
-               "p.clasificacion "
+               "p.clasificacion, " + self._COLUMNA_ASIENTOS + " "
                "FROM ventas v "
                "JOIN funciones f ON f.id = v.funcion_id "
                "JOIN peliculas p ON p.id = f.pelicula_id")
@@ -337,7 +516,7 @@ class CineService:
         """Una venta enriquecida o None."""
         fila = self.conn.execute(
             "SELECT v.*, f.sala, f.horario, p.titulo AS pelicula_titulo, "
-            "p.clasificacion "
+            "p.clasificacion, " + self._COLUMNA_ASIENTOS + " "
             "FROM ventas v "
             "JOIN funciones f ON f.id = v.funcion_id "
             "JOIN peliculas p ON p.id = f.pelicula_id "
@@ -377,7 +556,8 @@ class CineService:
             raise ErrorNegocio("Ámbito de reporte no válido.")
 
         sql = ("SELECT v.*, f.sala, f.horario, "
-               "p.titulo AS pelicula_titulo, p.clasificacion "
+               "p.titulo AS pelicula_titulo, p.clasificacion, "
+               + self._COLUMNA_ASIENTOS + " "
                "FROM ventas v "
                "JOIN funciones f ON f.id = v.funcion_id "
                "JOIN peliculas p ON p.id = f.pelicula_id "
@@ -402,7 +582,7 @@ class CineService:
 
 
 def sembrar_demo(servicio):
-    """Carga catálogo inicial si la base está vacía."""
+    """Carga catálogo inicial (sin solapamientos en cada sala)."""
     if servicio.listar_peliculas(solo_activas=False):
         return
     pelis = [
@@ -412,9 +592,9 @@ def sembrar_demo(servicio):
         ("El Reino Helado", "Fantasía", 114, "B", 79.90),
         ("Medianoche Dorada", "Comedia romántica", 102, "B", 69.50),
     ]
-    ids = []
-    for t, g, d, c, p in pelis:
-        ids.append(servicio.crear_pelicula(t, g, d, c, p).id)
+    ids = [servicio.crear_pelicula(*d).id for d in pelis]
+    sala1 = ["13:00", "16:00", "18:00", "20:00", "22:00"]
+    sala2 = ["13:00", "15:30", "17:30", "19:30", "21:30"]
     for idx in range(len(ids)):
-        servicio.crear_funcion(ids[idx], "Sala 1", f"{(13 + idx):02d}:00", 60)
-        servicio.crear_funcion(ids[idx], "Sala 2", f"{(18 + idx):02d}:30", 48)
+        servicio.crear_funcion(ids[idx], "Sala 1", sala1[idx], 60)
+        servicio.crear_funcion(ids[idx], "Sala 2", sala2[idx], 48)

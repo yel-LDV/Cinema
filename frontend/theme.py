@@ -184,6 +184,87 @@ def panel_info(master, texto, color_estrellas="verde"):
     return f
 
 
+def mapa_asientos(master, filas, on_change=None, solo_lectura=False,
+                  tamano=26):
+    """Mapa de asientos como cuadrícula de cuadrados.
+
+    filas:      [{'letra': 'A', 'asientos': [{'posicion','estado'}, ...]}, ...]
+    on_change:  callback(fila) cuando cambia la selección.
+    Devuelve (marco, seleccion) donde 'seleccion' es un set de posiciones.
+    """
+    seleccion = set()
+    botones = {}
+
+    def color(pos):
+        if pos in seleccion:
+            return PALETA["cian"]
+        estado = botones[pos]._neon_estado
+        if estado == "ocupado":
+            return "#5A1B46"
+        return PALETA["verde"]
+
+    def alternar(pos):
+        if solo_lectura or botones[pos]._neon_estado == "ocupado":
+            return
+        if pos in seleccion:
+            seleccion.discard(pos)
+        else:
+            seleccion.add(pos)
+        b = botones[pos]
+        b.configure(bg=color(pos))
+        if on_change:
+            on_change(seleccion)
+
+    contenedor = tk.Frame(master, bg=PALETA["panel"])
+    for fila in filas:
+        renglon = tk.Frame(contenedor, bg=PALETA["panel"])
+        renglon.pack(pady=4)
+        tk.Label(renglon, text=f"Fila {fila['letra']}", width=7,
+                 bg=PALETA["panel"], fg=PALETA["morado"],
+                 font=(FUENTE, 9, "bold")).pack(side="left")
+        medios = len(fila["asientos"]) // 2
+        for i, asiento in enumerate(fila["asientos"]):
+            if i == medios:
+                tk.Label(renglon, text="  ", bg=PALETA["panel"]).pack(
+                    side="left")
+            pos = asiento["posicion"]
+            estado = asiento["estado"]
+            numero = asiento.get("numero", pos.split("-")[-1])
+            disp = (estado != "ocupado") and not solo_lectura
+            btn = tk.Button(
+                renglon, width=2, height=1, font=(FUENTE, 8),
+                relief="flat", bd=0, cursor="hand2" if disp else "arrow",
+                text="X" if estado == "ocupado" else str(numero),
+                state="normal" if not (solo_lectura or estado == "ocupado")
+                else "disabled" if estado == "ocupado" or solo_lectura
+                else "normal")
+            btn.configure(
+                bg=("#5A1B46" if estado == "ocupado" else PALETA["verde"]),
+                disabledforeground=PALETA["texto_suave"],
+                activebackground=PALETA["cian"],
+                highlightbackground=PALETA["borde"],
+                highlightthickness=1)
+            btn._neon_estado = estado
+            btn._neon_numero = numero
+            botones[pos] = btn
+            if not (solo_lectura or estado == "ocupado"):
+                btn.configure(command=lambda p=pos: alternar(p))
+            btn.pack(side="left", padx=2)
+
+    leyenda = tk.Frame(contenedor, bg=PALETA["panel"])
+    leyenda.pack(pady=(8, 0))
+    for etiqueta, muestra in [("Libre", PALETA["verde"]),
+                              ("Ocupado", "#5A1B46"),
+                              ("Seleccionado", PALETA["cian"])]:
+        celda = tk.Frame(leyenda, bg=muestra, width=14, height=14)
+        celda.pack(side="left", padx=(12, 4), pady=2)
+        celda.pack_propagate(False)
+        tk.Label(leyenda, text=etiqueta, bg=PALETA["panel"],
+                 fg=PALETA["texto_suave"], font=(FUENTE, 9)).pack(side="left")
+
+    return contenedor, seleccion
+
+
 def abrir_archivo(ruta):
     """Abre un archivo con la aplicación predeterminada del sistema."""
     try:

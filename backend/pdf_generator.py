@@ -130,6 +130,7 @@ class TicketPDF:
             ("Horario", detalle["horario"]),
             ("Cliente", detalle["cliente_nombre"]),
             ("Edad", f"{detalle['edad']} años"),
+            ("Asientos", detalle.get("asientos") or "—"),
             ("Boletos", str(detalle["cantidad_boletos"])),
             ("Precio unitario", _dinero(detalle["precio_unitario"])),
             ("Descuento", _pct(detalle["descuento_pct"])

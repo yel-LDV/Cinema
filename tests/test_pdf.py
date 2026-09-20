@@ -12,10 +12,16 @@ def _escenario(tmp_path):
     return servicio, pelicula, funcion
 
 
+def _posiciones(servicio, funcion_id, n):
+    return servicio.posiciones_libres(funcion_id, n)
+
+
 def test_ticket_pdf_se_genera(tmp_path):
     servicio, _, funcion = _escenario(tmp_path)
-    venta = servicio.comprar_boletos(funcion.id, Cliente("Ana", 20), 2)
+    venta = servicio.comprar_boletos(funcion.id, Cliente("Ana", 20),
+                                     _posiciones(servicio, funcion.id, 2))
     detalle = servicio.detalle_venta(venta.folio)
+    assert detalle["asientos"]  # el boleto lleva los asientos
     ruta = TicketPDF().generar(detalle, salida_dir=str(tmp_path / "tickets"))
     assert os.path.isfile(ruta)
     assert os.path.getsize(ruta) > 0
@@ -24,8 +30,10 @@ def test_ticket_pdf_se_genera(tmp_path):
 
 def test_reporte_pdf_se_genera(tmp_path):
     servicio, _, funcion = _escenario(tmp_path)
-    servicio.comprar_boletos(funcion.id, Cliente("Ana", 20), 3)
-    servicio.comprar_boletos(funcion.id, Cliente("Nia", 10), 2)
+    servicio.comprar_boletos(funcion.id, Cliente("Ana", 20),
+                             _posiciones(servicio, funcion.id, 3))
+    servicio.comprar_boletos(funcion.id, Cliente("Nia", 10),
+                             _posiciones(servicio, funcion.id, 2))
     reporte = servicio.ventas_reporte("general")
     ruta = ReporteVentasPDF().generar(reporte, salida_dir=str(tmp_path / "rep"))
     assert os.path.isfile(ruta)

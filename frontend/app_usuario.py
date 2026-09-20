@@ -106,15 +106,14 @@ class AppUsuario(tk.Toplevel):
     #                    Módulo 2: comprar boletos                       #
     # ---------------------------------------------------------------- #
     def _v_comprar(self):
-        win = self._nueva_ventana("Comprar boletos", 540, 540)
+        win = self._nueva_ventana("Comprar boletos", 720, 760)
         form = theme.marco(win, relleno=16)
         form.pack(fill="x", padx=16, pady=10)
 
         opciones = self._opciones_funciones()
-        cb_funcion = theme.combobox(form, opciones, 48)
-        en_nombre = theme.entrada(form, 48)
+        cb_funcion = theme.combobox(form, opciones, 44)
+        en_nombre = theme.entrada(form, 42)
         en_edad = theme.entrada(form, 20)
-        en_cantidad = theme.entrada(form, 20)
 
         tk.Label(form, text="Función", bg=T["panel"], fg=T["morado"],
                  font=theme.ETIQUETA).grid(row=0, column=0, sticky="w",
@@ -128,11 +127,43 @@ class AppUsuario(tk.Toplevel):
                  font=theme.ETIQUETA).grid(row=2, column=0, sticky="w",
                                            pady=3)
         en_edad.grid(row=2, column=1, sticky="w", padx=6)
-        tk.Label(form, text="Boletos", bg=T["panel"], fg=T["morado"],
-                 font=theme.ETIQUETA).grid(row=3, column=0, sticky="w",
-                                           pady=3)
-        en_cantidad.grid(row=3, column=1, sticky="w", padx=6)
         form.columnconfigure(1, weight=1)
+
+        zona_mapa = tk.Frame(win, bg=T["panel"])
+        zona_mapa.pack(padx=16, pady=(4, 0))
+
+        lbl_asientos = tk.Label(
+            win, text="0 asientos seleccionados — elige la función y haz "
+                      "clic en la sala", bg=T["fondo"],
+            fg=T["texto_suave"], font=theme.TEXTO_F)
+        lbl_asientos.pack(pady=4)
+
+        estado_mapa = {"seleccion": set()}
+
+        def actualizar_lbl(seleccion):
+            estado_mapa["seleccion"] = set(seleccion)
+            if seleccion:
+                lista = ", ".join(sorted(seleccion))
+                lbl_asientos.configure(
+                    text=f"{len(seleccion)} asiento(s): {lista}",
+                    fg=T["cian"])
+            else:
+                lbl_asientos.configure(
+                    text="0 asientos seleccionados — clic en asientos verdes",
+                    fg=T["texto_suave"])
+
+        def cargar_mapa():
+            for w in zona_mapa.winfo_children():
+                w.destroy()
+            actualizar_lbl(set())
+            if not cb_funcion.get():
+                tk.Label(zona_mapa, text="Selecciona una función para ver "
+                                         "la sala", bg=T["panel"],
+                         fg=T["texto_suave"], font=theme.TEXTO_F).pack()
+                return
+            f = self.servicio.obtener_funcion(funcion_id())
+            theme.mapa_asientos(zona_mapa, self._filas_asientos(f.id),
+                                on_change=actualizar_lbl)
 
         def funcion_id():
             texto = cb_funcion.get()
@@ -150,27 +181,24 @@ class AppUsuario(tk.Toplevel):
         def calcular():
             try:
                 f = self.servicio.obtener_funcion(funcion_id())
-                if f is None:
-                    raise ErrorNegocio("Función no encontrada.")
                 p = self.servicio.obtener_pelicula(f.pelicula_id)
+                seleccion = estado_mapa["seleccion"]
+                if not seleccion:
+                    raise ErrorNegocio("Selecciona al menos un asiento.")
+                cantidad = len(seleccion)
                 edad = leer(en_edad, "La edad")
-                cantidad = leer(en_cantidad, "La cantidad")
                 cliente = Cliente(en_nombre.get() or "Cliente", edad)
                 if not cliente.validar_clasificacion(p.clasificacion):
                     raise ErrorNegocio(
                         f"{p.titulo} es clasificación {p.clasificacion} "
                         f"y requiere edad mínima de "
                         f"{edad_minima_clasificacion(p.clasificacion)} años.")
-                if cantidad > f.disponibles:
-                    raise ErrorNegocio(
-                        f"Solo hay {f.disponibles} lugares libres en esa "
-                        f"función.")
                 desc = cliente.calcular_descuento()
                 total = round(cantidad * p.precio_base * (1 - desc), 2)
                 aviso(win,
-                      f"{cliente.nombre} · {cantidad} boleto(s) × "
-                      f"${p.precio_base:.2f} · descuento {desc * 100:.0f}%"
-                      f" · TOTAL ${total:.2f}", True)
+                      f"{cliente.nombre} ({edad} años) · {cantidad} "
+                      f"boleto(s) × ${p.precio_base:.2f} · descuento "
+                      f"{desc * 100:.0f}% · TOTAL ${total:.2f}", True)
             except (ErrorNegocio, ValueError) as e:
                 aviso(win, str(e), False)
 
@@ -178,27 +206,51 @@ class AppUsuario(tk.Toplevel):
             try:
                 cliente = Cliente(en_nombre.get(),
                                   leer(en_edad, "La edad"))
-                cantidad = leer(en_cantidad, "La cantidad")
+                seleccion = sorted(estado_mapa["seleccion"])
+                if not seleccion:
+                    raise ErrorNegocio("Selecciona al menos un asiento.")
                 venta = self.servicio.comprar_boletos(
-                    funcion_id(), cliente, cantidad)
+                    funcion_id(), cliente, seleccion)
                 detalle = self.servicio.detalle_venta(venta.folio)
                 ruta = TicketPDF().generar(detalle)
                 aviso(win,
-                      f"Compra registrada. Folio {venta.folio}, total "
-                      f"${venta.total:.2f}.\nTicket: {ruta}", True)
+                      f"Compra registrada. Folio {venta.folio} · Asientos: "
+                      f"{', '.join(seleccion)} · Total ${venta.total:.2f}.\n"
+                      f"Ticket: {ruta}", True)
                 theme.boton(win, "Abrir ticket PDF",
                             lambda: theme.abrir_archivo(ruta), "verde",
                             ancho=18).pack(pady=4)
                 cb_funcion["values"] = self._opciones_funciones()
+                cargar_mapa()
             except (ErrorNegocio, ValueError) as e:
                 aviso(win, str(e), False)
 
+        tk.Label(win, text="Asientos (clic para elegir)", bg=T["fondo"],
+                 fg=T["morado"], font=theme.ETIQUETA).pack(anchor="w",
+                                                           padx=20)
+        cb_funcion.bind("<<ComboboxSelected>>",
+                        lambda e: cargar_mapa())
+        bienvenida = tk.Label(zona_mapa, text="Selecciona una función para "
+                                              "ver la sala", bg=T["panel"],
+                              fg=T["texto_suave"], font=theme.TEXTO_F)
+        bienvenida.pack(pady=6)
         botones = tk.Frame(win, bg=T["fondo"])
         botones.pack(pady=6)
         theme.boton(botones, "Calcular", calcular, "cian",
                     ancho=14).pack(side="left", padx=6)
         theme.boton(botones, "Confirmar compra", confirmar, "rosa",
                     ancho=14).pack(side="left", padx=6)
+
+    def _filas_asientos(self, funcion_id):
+        """Agrupa los asientos de una función por fila para el mapa."""
+        filas = []
+        actual = None
+        for a in self.servicio.listar_asientos(funcion_id):
+            if actual is None or actual["letra"] != a["fila"]:
+                actual = {"letra": a["fila"], "asientos": []}
+                filas.append(actual)
+            actual["asientos"].append(a)
+        return filas
 
     def _opciones_funciones(self):
         opciones = []
