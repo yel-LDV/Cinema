@@ -43,7 +43,7 @@ _COLORES_BOTON = {
 }
 
 
-def aplicar_raiz(raiz, titulo="Cine Neón"):
+def aplicar_raiz(raiz, titulo="Cinema"):
     raiz.configure(bg=PALETA["fondo"])
     if titulo:
         raiz.title(titulo)
@@ -216,6 +216,10 @@ def mapa_asientos(master, filas, on_change=None, solo_lectura=False,
             on_change(seleccion)
 
     contenedor = tk.Frame(master, bg=PALETA["panel"])
+    if not filas:
+        tk.Label(contenedor, text="Esta función no tiene asientos.",
+                 bg=PALETA["panel"], fg=PALETA["texto_suave"],
+                 font=(FUENTE, 10)).pack(pady=8)
     for fila in filas:
         renglon = tk.Frame(contenedor, bg=PALETA["panel"])
         renglon.pack(pady=4)
@@ -262,6 +266,7 @@ def mapa_asientos(master, filas, on_change=None, solo_lectura=False,
         tk.Label(leyenda, text=etiqueta, bg=PALETA["panel"],
                  fg=PALETA["texto_suave"], font=(FUENTE, 9)).pack(side="left")
 
+    contenedor.pack()
     return contenedor, seleccion
 
 
@@ -280,11 +285,11 @@ def abrir_archivo(ruta):
 
 
 def titulo_neon(master):
-    """Encabezado 'CINE NEÓN' con letras de dos colores."""
+    """Encabezado 'CINEMA' con letras de dos colores."""
     frame = tk.Frame(master, bg=PALETA["fondo"])
     b1 = tk.Label(frame, text="CINE", bg=PALETA["fondo"],
                   fg=PALETA["rosa"], font=(FUENTE, 30, "bold"))
-    b2 = tk.Label(frame, text="NEÓN", bg=PALETA["fondo"],
+    b2 = tk.Label(frame, text="MA", bg=PALETA["fondo"],
                   fg=PALETA["cian"], font=(FUENTE, 30, "bold"))
     b1.pack(side="left")
     b2.pack(side="left")

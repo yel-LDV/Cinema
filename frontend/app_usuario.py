@@ -53,7 +53,7 @@ class AppUsuario(tk.Toplevel):
         super().__init__(raiz)
         self.raiz = raiz
         self.servicio = servicio
-        theme.aplicar_raiz(self, "Cine Neón · Usuario")
+        theme.aplicar_raiz(self, "Cinema · Usuario")
         self.ventanas_abiertas = []
         self._armar_menu()
         self.protocol("WM_DELETE_WINDOW", self.salir)

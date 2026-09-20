@@ -1,4 +1,4 @@
-# CinePy — Cine Neón 🎬
+# Cinema 🎬
 
 Sistema de venta de boletos de cine con interfaz gráfica en **Tkinter**, tema **neón** (morado/rosa/cian), persistencia en **SQLite**, diseño **orientado a objetos** y generación de **tickets y estados de cuenta en PDF** (reportlab).
 
@@ -74,21 +74,30 @@ python3 -m venv .venv
 .venv/bin/python main.py
 ```
 
-En el lanzador elige **Usuario** o **Administración**:
+En el lanzador elige **Usuario** o **Administración** (este último pide usuario y contraseña).
 
 ### Módulos del usuario
 
 1. **Mostrar películas** — cartelera con géneros, duración, clasificación y precio.
-2. **Comprar boletos** — eliges función, cliente, edad y cantidad; se muestra el descuento y el total antes de confirmar. Al confirmar se genera `tickets/ticket_<folio>.pdf`.
+2. **Comprar boletos** — eliges función y el **mapa de asientos de la sala** (verde=libre, rojo=ocupado, cian=seleccionado); el número de asientos elegidos es la cantidad de boletos. Se muestra el descuento y el total antes de confirmar. Al confirmar se genera `tickets/ticket_<folio>.pdf` con los asientos.
 3. **Lugares disponibles** — tablero por función (capacidad, ocupados y libres).
-4. **Cancelar compra** — por folio; libera los lugares e invalida la cuenta.
+4. **Cancelar compra** — por folio; libera los asientos e invalida la cuenta.
 5. **Mostrar ventas** — historial completo con folio, película, cliente y total.
 6. **Salir**.
 
 ### Panel de administración
 
-- **Películas**: ver catálogo, alta y baja (la baja la quita de la cartelera e impide nuevas ventas).
-- **Funciones**: ver todas y crear funciones (sala, horario, capacidad).
+- **Acceso**: se entra con las credenciales definidas en `data/config.json` (se crea en el primer intento con la cuenta inicial `admin` / `admin123`). Para agregar o cambiar cuentas de administrador solo se edita ese archivo a mano:
+  ```json
+  {
+    "admins": [
+      {"usuario": "admin", "hash": "<sha256 de la contraseña>"}
+    ]
+  }
+  ```
+  El hash se calcula con `sha256`, p. ej.: `python3 -c "import hashlib; print(hashlib.sha256('miclave'.encode()).hexdigest())"`. La contraseña nunca se guarda en texto plano y la aplicación no tiene ninguna pantalla para crear admins.
+- **Películas**: ver catálogo, alta, **editar** (título, género, duración, precio, clasificación) y baja (la baja la quita de la cartelera e impide nuevas ventas).
+- **Funciones**: ver todas, crear funciones (sala, horario, capacidad) y **ver el mapa de asientos** de cada una. Las funciones de una misma sala no pueden solaparse según la duración de la película.
 - **Ventas**: ver cualquiera y cancelar por folio.
 - **Reportes PDF**: genera estados de cuenta **general**, **por película**, **por día** (`AAAA-MM-DD`) o **por mes** (`AAAA-MM`) en `reportes/`, y los abre con el visor predeterminado.
 
@@ -98,6 +107,6 @@ En el lanzador elige **Usuario** o **Administración**:
 .venv/bin/python -m pytest tests -q
 ```
 
-Cubren los bordes de descuentos (12/13/17/18/59/60 años), bloqueo por disponibilidad y clasificación, unicidad del folio, cancelación/doble cancelación, totales de reportes y generación real de PDFs.
+Cubren los bordes de descuentos (12/13/17/18/59/60 años), bloqueo por disponibilidad y clasificación, asientos (ocupados/liberados/al solape), edición de películas, unicidad del folio, cancelación/doble cancelación, totales de reportes, autenticación (hash y login) y generación real de PDFs.
 
 > Los directorios `data/`, `tickets/` y `reportes/` se crean en el primer arranque. Si borras `data/cine.db`, el programa vuelve a sembrar un catálogo de ejemplo.

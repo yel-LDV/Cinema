@@ -104,7 +104,7 @@ class TicketPDF:
         doc = SimpleDocTemplate(
             ruta, pagesize=A6, topMargin=15 * mm, bottomMargin=12 * mm,
             leftMargin=12 * mm, rightMargin=12 * mm,
-            title=f"Ticket {folio}", author="Cine Neón")
+            title=f"Ticket {folio}", author="Cinema")
         doc.firstPage = _FondoNeon()
         doc.laterPages = _FondoNeon()
 
@@ -183,7 +183,7 @@ class ReporteVentasPDF:
         doc = SimpleDocTemplate(
             ruta, pagesize=landscape(A4), topMargin=16 * mm,
             bottomMargin=14 * mm, leftMargin=12 * mm, rightMargin=12 * mm,
-            title=reporte["titulo"], author="Cine Neón")
+            title=reporte["titulo"], author="Cinema")
         doc.firstPage = _FondoNeon()
         doc.laterPages = _FondoNeon()
 
