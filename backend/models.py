@@ -95,7 +95,7 @@ def _generar_disposicion(capacidad, por_fila=SEATS_POR_FILA):
 
 class Pelicula:
     def __init__(self, id, titulo, genero, duracion_min, clasificacion,
-                 precio_base, activa=True):
+                 precio_base, activa=True, imagen=""):
         self.id = id
         self.titulo = titulo
         self.genero = genero
@@ -103,12 +103,14 @@ class Pelicula:
         self.clasificacion = clasificacion
         self.precio_base = precio_base
         self.activa = bool(activa)
+        self.imagen = imagen or ""
 
     @classmethod
     def desde_fila(cls, fila):
         return cls(fila["id"], fila["titulo"], fila["genero"],
                    fila["duracion_min"], fila["clasificacion"],
-                   fila["precio_base"], fila["activa"])
+                   fila["precio_base"], fila["activa"],
+                   fila["imagen"] if "imagen" in fila.keys() else "")
 
     def __repr__(self):
         return f"<Pelicula {self.id} {self.titulo!r}>"
@@ -213,31 +215,44 @@ class CineService:
         return titulo.strip(), genero.strip()
 
     def crear_pelicula(self, titulo, genero, duracion_min, clasificacion,
-                       precio_base):
+                       precio_base, imagen=""):
         titulo, genero = self._validar_datos_pelicula(
             titulo, genero, duracion_min, clasificacion, precio_base)
         cur = self.conn.execute(
             "INSERT INTO peliculas (titulo, genero, duracion_min, "
-            "clasificacion, precio_base, activa) VALUES (?, ?, ?, ?, ?, 1)",
-            (titulo, genero, duracion_min, clasificacion, precio_base))
+            "clasificacion, precio_base, activa, imagen) "
+            "VALUES (?, ?, ?, ?, ?, 1, ?)",
+            (titulo, genero, duracion_min, clasificacion, precio_base,
+             imagen or ""))
         self.conn.commit()
         return self.obtener_pelicula(cur.lastrowid)
 
     def editar_pelicula(self, pelicula_id, titulo, genero, duracion_min,
-                        clasificacion, precio_base):
+                        clasificacion, precio_base, imagen=None):
         """Actualiza la película; rechaza cambios de duración que solapen
-        funciones ya programadas."""
+        funciones ya programadas. imagen=None conserva la actual."""
         if self.obtener_pelicula(pelicula_id) is None:
             raise ErrorNegocio("Película no encontrada.")
         titulo, genero = self._validar_datos_pelicula(
             titulo, genero, duracion_min, clasificacion, precio_base)
-        with self.conn:
-            self.conn.execute(
-                "UPDATE peliculas SET titulo=?, genero=?, duracion_min=?, "
-                "clasificacion=?, precio_base=? WHERE id=?",
-                (titulo, genero, duracion_min, clasificacion, precio_base,
-                 pelicula_id))
-            self._verificar_solapamientos_pelicula(pelicula_id, duracion_min)
+        if imagen is None:
+            with self.conn:
+                self.conn.execute(
+                    "UPDATE peliculas SET titulo=?, genero=?, duracion_min=?, "
+                    "clasificacion=?, precio_base=? WHERE id=?",
+                    (titulo, genero, duracion_min, clasificacion, precio_base,
+                     pelicula_id))
+                self._verificar_solapamientos_pelicula(pelicula_id,
+                                                       duracion_min)
+        else:
+            with self.conn:
+                self.conn.execute(
+                    "UPDATE peliculas SET titulo=?, genero=?, duracion_min=?, "
+                    "clasificacion=?, precio_base=?, imagen=? WHERE id=?",
+                    (titulo, genero, duracion_min, clasificacion, precio_base,
+                     imagen or "", pelicula_id))
+                self._verificar_solapamientos_pelicula(pelicula_id,
+                                                       duracion_min)
         return self.obtener_pelicula(pelicula_id)
 
     def dar_de_baja_pelicula(self, pelicula_id):
@@ -593,8 +608,10 @@ def sembrar_demo(servicio):
         ("Medianoche Dorada", "Comedia romántica", 102, "B", 69.50),
     ]
     ids = [servicio.crear_pelicula(*d).id for d in pelis]
-    sala1 = ["13:00", "16:00", "18:00", "20:00", "22:00"]
-    sala2 = ["13:00", "15:30", "17:30", "19:30", "21:30"]
+    # Horarios sin solapamientos entre funciones de la misma sala
+    # (duración + horario marca el fin de la ocupación).
+    sala1 = ["13:00", "16:00", "18:30", "20:30", "22:30"]
+    sala2 = ["10:00", "13:00", "15:30", "17:30", "19:45"]
     for idx in range(len(ids)):
         servicio.crear_funcion(ids[idx], "Sala 1", sala1[idx], 60)
         servicio.crear_funcion(ids[idx], "Sala 2", sala2[idx], 48)

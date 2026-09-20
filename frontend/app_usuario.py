@@ -1,5 +1,6 @@
-"""Interfaz del usuario final: cartelera, compra (con ticket PDF), lugares
-disponibles, cancelación, historial de ventas y salir.
+"""Interfaz del usuario final: pasarela de películas con imágenes, compra
+(con ticket PDF), lugares disponibles, cancelación, historial de ventas
+y salir. Admite varias ventanas de cliente abiertas a la vez.
 """
 
 import tkinter as tk
@@ -10,13 +11,6 @@ from backend.pdf_generator import TicketPDF
 from frontend import theme
 
 T = theme.PALETA
-
-COL_PELICULA = [("titulo", "Película", 240, "w"),
-                ("genero", "Género", 150, "w"),
-                ("duracion", "Duración", 80, "center"),
-                ("clas", "Clasif.", 70, "center"),
-                ("precio", "Precio", 90, "e"),
-                ("estado", "Estado", 80, "center")]
 
 COL_FUNCION = [("id", "ID", 45, "center"),
                ("titulo", "Película", 200, "w"),
@@ -54,6 +48,7 @@ class AppUsuario(tk.Toplevel):
         self.raiz = raiz
         self.servicio = servicio
         theme.aplicar_raiz(self, "Cinema · Usuario")
+        self.geometry("1060x760")
         self.ventanas_abiertas = []
         self._armar_menu()
         self.protocol("WM_DELETE_WINDOW", self.salir)
@@ -62,71 +57,68 @@ class AppUsuario(tk.Toplevel):
     #                              Menú                                 #
     # ---------------------------------------------------------------- #
     def _armar_menu(self):
-        frame = theme.marco(self, relleno=24)
-        frame.pack(padx=24, pady=24, fill="both", expand=True)
+        frame = theme.marco(self, relleno=18)
+        frame.pack(padx=18, pady=18, fill="both", expand=True)
 
-        theme.titulo_neon(frame).pack(pady=(0, 4))
-        tk.Label(frame, text="Usuario", bg=T["panel"],
-                 fg=T["morado"], font=theme.SUBTITULO).pack()
+        titulo = theme.titulo_neon(frame)
+        titulo.pack(pady=(0, 2))
+        tk.Label(frame, text="Cartelera · toca una película para comprar",
+                 bg=T["panel"], fg=T["morado"],
+                 font=theme.SUBTITULO).pack()
+
+        theme.pasarela(frame, self.servicio.listar_peliculas(),
+                       self._v_comprar)
 
         area = tk.Frame(frame, bg=T["panel"])
-        area.pack(pady=14)
+        area.pack(pady=(14, 6))
         for texto, comando, color in [
-            ("01  Mostrar películas", self._v_peliculas, "morado"),
-            ("02  Comprar boletos", self._v_comprar, "rosa"),
-            ("03  Lugares disponibles", self._v_lugares, "cian"),
-            ("04  Cancelar compra", self._v_cancelar, "ambar"),
-            ("05  Mostrar ventas", self._v_ventas, "verde"),
-            ("06  Salir", self.salir, "rojo"),
+            ("Lugares disponibles", self._v_lugares, "cian"),
+            ("Cancelar compra", self._v_cancelar, "ambar"),
+            ("Mostrar ventas", self._v_ventas, "verde"),
+            ("Salir", self.salir, "rojo"),
         ]:
-            theme.boton(area, texto, comando, color, tamano=theme.BOTON_G,
-                        ancho=28).pack(pady=4)
+            theme.boton(area, texto, comando, color,
+                        ancho=20).pack(side="left", padx=5)
 
         tk.Label(frame, text="Los boletos se guardan en ./tickets",
                  bg=T["panel"], fg=T["texto_suave"],
                  font=theme.TEXTO_F).pack()
 
     # ---------------------------------------------------------------- #
-    #                          Módulo 1: cartelera                      #
-    # ---------------------------------------------------------------- #
-    def _v_peliculas(self):
-        win = self._nueva_ventana("Cartelera de películas", 720, 430)
-        peliculas = self.servicio.listar_peliculas()
-        filas = [[p.titulo, p.genero, f"{p.duracion_min} min",
-                  p.clasificacion, f"${p.precio_base:.2f}",
-                  "En cartelera" if p.activa else "Retirada"]
-                 for p in peliculas]
-        cuerpo, _ = theme.crear_tabla(win, COL_PELICULA, filas)
-        cuerpo.pack(fill="both", expand=True, padx=16, pady=8)
-        if not peliculas:
-            aviso(win, "No hay películas en cartelera.")
-        theme.boton(win, "Cerrar", win.destroy, "panel", ancho=14).pack(pady=10)
-
-    # ---------------------------------------------------------------- #
     #                    Módulo 2: comprar boletos                       #
     # ---------------------------------------------------------------- #
-    def _v_comprar(self):
-        win = self._nueva_ventana("Comprar boletos", 720, 760)
+    def _v_comprar(self, pelicula=None):
+        win = self._nueva_ventana("Comprar boletos", 740, 800)
         form = theme.marco(win, relleno=16)
         form.pack(fill="x", padx=16, pady=10)
 
-        opciones = self._opciones_funciones()
+        opciones = list(self._opciones_funciones(pelicula))
         cb_funcion = theme.combobox(form, opciones, 44)
         en_nombre = theme.entrada(form, 42)
         en_edad = theme.entrada(form, 20)
 
+        if pelicula is not None:
+            tk.Label(form, text="Película", bg=T["panel"], fg=T["rosa"],
+                     font=theme.ETIQUETA).grid(row=0, column=0, sticky="w",
+                                               pady=3)
+            tk.Label(form, text=pelicula.titulo, bg=T["panel"],
+                     fg=T["texto"], font=theme.TEXTO_F).grid(
+                row=0, column=1, sticky="w", padx=6)
+            inicio = 1
+        else:
+            inicio = 0
         tk.Label(form, text="Función", bg=T["panel"], fg=T["morado"],
-                 font=theme.ETIQUETA).grid(row=0, column=0, sticky="w",
+                 font=theme.ETIQUETA).grid(row=inicio, column=0, sticky="w",
                                            pady=3)
-        cb_funcion.grid(row=0, column=1, sticky="we", padx=6)
+        cb_funcion.grid(row=inicio, column=1, sticky="we", padx=6)
         tk.Label(form, text="Cliente", bg=T["panel"], fg=T["morado"],
-                 font=theme.ETIQUETA).grid(row=1, column=0, sticky="w",
-                                           pady=3)
-        en_nombre.grid(row=1, column=1, sticky="we", padx=6)
+                 font=theme.ETIQUETA).grid(row=inicio + 1, column=0,
+                                           sticky="w", pady=3)
+        en_nombre.grid(row=inicio + 1, column=1, sticky="we", padx=6)
         tk.Label(form, text="Edad", bg=T["panel"], fg=T["morado"],
-                 font=theme.ETIQUETA).grid(row=2, column=0, sticky="w",
-                                           pady=3)
-        en_edad.grid(row=2, column=1, sticky="w", padx=6)
+                 font=theme.ETIQUETA).grid(row=inicio + 2, column=0,
+                                           sticky="w", pady=3)
+        en_edad.grid(row=inicio + 2, column=1, sticky="w", padx=6)
         form.columnconfigure(1, weight=1)
 
         zona_mapa = tk.Frame(win, bg=T["panel"])
@@ -217,13 +209,29 @@ class AppUsuario(tk.Toplevel):
                       f"Compra registrada. Folio {venta.folio} · Asientos: "
                       f"{', '.join(seleccion)} · Total ${venta.total:.2f}.\n"
                       f"Ticket: {ruta}", True)
+                for b in botones.winfo_children():
+                    b.destroy()
+
+                def volver():
+                    win.destroy()
+                    if win in self.ventanas_abiertas:
+                        self.ventanas_abiertas.remove(win)
+
                 theme.boton(win, "Abrir ticket PDF",
                             lambda: theme.abrir_archivo(ruta), "verde",
                             ancho=18).pack(pady=4)
-                cb_funcion["values"] = self._opciones_funciones()
-                cargar_mapa()
+                theme.boton(win, "Volver al inicio", volver, "cian",
+                            ancho=18).pack(pady=6)
             except (ErrorNegocio, ValueError) as e:
                 aviso(win, str(e), False)
+
+        if pelicula is not None:
+            if not opciones:
+                aviso(win, f"{pelicula.titulo} no tiene funciones "
+                           "programadas.", False)
+            else:
+                cb_funcion.set(opciones[0])
+                win.after(60, cargar_mapa)
 
         tk.Label(win, text="Asientos (clic para elegir)", bg=T["fondo"],
                  fg=T["morado"], font=theme.ETIQUETA).pack(anchor="w",
@@ -252,9 +260,11 @@ class AppUsuario(tk.Toplevel):
             actual["asientos"].append(a)
         return filas
 
-    def _opciones_funciones(self):
+    def _opciones_funciones(self, pelicula=None):
         opciones = []
         for f in self.servicio.listar_funciones():
+            if pelicula is not None and f.pelicula_id != pelicula.id:
+                continue
             p = self.servicio.obtener_pelicula(f.pelicula_id)
             opciones.append(
                 f"#{f.id} · {p.titulo} · {f.sala} · {f.horario} · "
@@ -319,11 +329,12 @@ class AppUsuario(tk.Toplevel):
     #                              Utilidades                            #
     # ---------------------------------------------------------------- #
     def _nueva_ventana(self, titulo, ancho, alto):
+        """Abre una ventana de trabajo. No es modal: así pueden convivir
+        varias ventanas de cliente a la vez."""
         win = tk.Toplevel(self.raiz)
         theme.aplicar_raiz(win, titulo)
         win.geometry(f"{ancho}x{alto}")
         win.transient(self.raiz)
-        win.grab_set()
         self.ventanas_abiertas.append(win)
         return win
 

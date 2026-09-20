@@ -294,3 +294,110 @@ def titulo_neon(master):
     b1.pack(side="left")
     b2.pack(side="left")
     return frame
+
+
+ANCHO_TARJETA = 176
+ALTO_IMAGEN = 240
+
+
+def tarjeta_pelicula(master, pelicula, on_click):
+    """Tarjeta clicable de una película (foto o marcador con su título)."""
+    card = tk.Frame(master, bg=PALETA["panel2"],
+                    highlightbackground=PALETA["borde"],
+                    highlightthickness=2, cursor="hand2")
+    img_marco = tk.Frame(card, bg=PALETA["entrada"], width=ANCHO_TARJETA,
+                         height=ALTO_IMAGEN)
+    img_marco.pack_propagate(False)
+    img_marco.pack(padx=6, pady=(6, 2))
+
+    def actualizar_imagen():
+        for hijo in img_marco.winfo_children():
+            hijo.destroy()
+        # Import tardío: backend.poster usa PIL y no debe cargarse con theme
+        from backend.poster import cargar_thumb
+        foto = cargar_thumb(pelicula.imagen,
+                            (ANCHO_TARJETA - 6, ALTO_IMAGEN - 6))
+        if foto:
+            lbl = tk.Label(img_marco, image=foto, bg=PALETA["entrada"])
+            lbl.photo = foto  # evita que el recolector borre la imagen
+            lbl.place(relx=.5, rely=.5, anchor="center")
+        else:
+            lbl = tk.Label(img_marco, text=pelicula.titulo,
+                           bg=PALETA["entrada"], fg=PALETA["texto_suave"],
+                           font=(FUENTE, 13, "bold"),
+                           wraplength=ANCHO_TARJETA - 24, justify="center")
+            lbl.place(relx=.5, rely=.5, anchor="center")
+
+    actualizar_imagen()
+    titulo_lbl = tk.Label(card, text=pelicula.titulo, bg=PALETA["panel2"],
+                          fg=PALETA["texto"], font=(FUENTE, 10, "bold"),
+                          wraplength=ANCHO_TARJETA - 8, justify="center")
+    titulo_lbl.pack(pady=(2, 6))
+    for w in (card, img_marco, titulo_lbl):
+        w.bind("<Button-1>", lambda e, p=pelicula: on_click(p))
+        w.bind("<Enter>",
+               lambda e: card.configure(highlightbackground=PALETA["cian"]))
+        w.bind("<Leave>",
+               lambda e: card.configure(highlightbackground=PALETA["borde"]))
+    card._neon_pelicula_id = pelicula.id
+    return card
+
+
+def pasarela(master, peliculas, on_click, alto=330):
+    """Carrusel horizontal de películas con flechas ◀ ▶ y rueda del ratón.
+
+    peliculas: lista de objetos Pelicula.
+    on_click:  callback(pelicula) al hacer clic en una tarjeta.
+    Devuelve el contenedor (con ._neon_canvas para desplazarlo).
+    """
+    contenedor = tk.Frame(master, bg=PALETA["panel"])
+    cab = tk.Frame(contenedor, bg=PALETA["panel"])
+    cab.pack(fill="x", padx=6, pady=(4, 0))
+
+    def xview(delta):
+        contenedor._neon_canvas.xview_scroll(delta, "units")
+
+    def ruleta(event):
+        d = event.delta
+        if not d:
+            if getattr(event, "num", None) == 4:
+                d = 120
+            elif getattr(event, "num", None) == 5:
+                d = -120
+        if d:
+            xview(-(d // 120))
+
+    theme_boton_izq = tk.Button(
+        cab, text="◀", command=lambda: xview(-3), bg=PALETA["morado"],
+        fg=PALETA["fondo"], font=BOTON_F, relief="flat", cursor="hand2",
+        activebackground=PALETA["rosa"], padx=10, pady=4)
+    theme_boton_izq.pack(side="left", padx=(0, 8))
+    tk.Label(cab, text="Cartelera", bg=PALETA["panel"],
+             fg=PALETA["cian"], font=SUBTITULO).pack(side="left", expand=True)
+    theme_boton_der = tk.Button(
+        cab, text="▶", command=lambda: xview(3), bg=PALETA["morado"],
+        fg=PALETA["fondo"], font=BOTON_F, relief="flat", cursor="hand2",
+        activebackground=PALETA["rosa"], padx=10, pady=4)
+    theme_boton_der.pack(side="right", padx=(8, 0))
+
+    lienzo_contenedor = tk.Frame(contenedor, bg=PALETA["panel"])
+    lienzo_contenedor.pack(fill="x", padx=6, pady=(2, 6))
+    canvas = tk.Canvas(lienzo_contenedor, height=alto, bg=PALETA["panel"],
+                       highlightthickness=0)
+    lienzo = tk.Frame(canvas, bg=PALETA["panel"])
+    ventana = canvas.create_window((0, 0), window=lienzo, anchor="nw")
+    contenedor._neon_canvas = canvas
+
+    def ajustar(event):
+        canvas.itemconfigure(ventana, width=event.width)
+        canvas.configure(scrollregion=canvas.bbox("all"))
+
+    canvas.bind("<Configure>", ajustar)
+    canvas.bind("<MouseWheel>", ruleta)
+    canvas.pack(fill="x")
+    for peli in peliculas:
+        tarjeta = tarjeta_pelicula(lienzo, peli, on_click)
+        tarjeta.pack(side="left", padx=8, pady=6)
+        tarjeta.bind("<MouseWheel>", ruleta)
+    contenedor.pack(fill="x")
+    return contenedor

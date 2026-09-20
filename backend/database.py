@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS peliculas (
     duracion_min INTEGER NOT NULL CHECK (duracion_min > 0),
     clasificacion TEXT NOT NULL,
     precio_base REAL NOT NULL CHECK (precio_base >= 0),
-    activa INTEGER NOT NULL DEFAULT 1
+    activa INTEGER NOT NULL DEFAULT 1,
+    imagen TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS funciones (
@@ -92,4 +93,15 @@ def inicializar_db(ruta=None):
         conn.commit()
     conn.executescript(ESQUEMA)
     conn.commit()
+    _migrar_columnas(conn)
     return conn
+
+
+def _migrar_columnas(conn):
+    """Agrega columnas nuevas a tablas que ya existen en versiones previas."""
+    columnas = {row["name"] for row in conn.execute(
+        "PRAGMA table_info(peliculas)")}
+    if "imagen" not in columnas:
+        conn.execute("ALTER TABLE peliculas ADD COLUMN imagen TEXT "
+                     "NOT NULL DEFAULT ''")
+        conn.commit()

@@ -317,6 +317,78 @@ class TestEditarPelicula:
             servicio.editar_pelicula(999, "X", "Drama", 90, "B", 50)
 
 
+class TestImagenPelicula:
+    def test_crear_sin_imagen(self, servicio):
+        assert servicio.crear_pelicula(
+            "X", "Drama", 90, "B", 60).imagen == ""
+
+    def test_crear_con_imagen_la_persiste(self, servicio):
+        p = servicio.crear_pelicula("X", "Drama", 90, "B", 60,
+                                    imagen="data/Carteles/cartel_9.png")
+        assert p.imagen == "data/Carteles/cartel_9.png"
+        assert servicio.obtener_pelicula(p.id).imagen == p.imagen
+
+    def test_editar_con_imagen_actualiza(self, servicio):
+        p = servicio.crear_pelicula("X", "Drama", 90, "B", 60)
+        editado = servicio.editar_pelicula(p.id, "X", "Drama", 90, "B", 60,
+                                           imagen="data/Carteles/a.png")
+        assert editado.imagen == "data/Carteles/a.png"
+        assert servicio.obtener_pelicula(p.id).imagen == \
+            "data/Carteles/a.png"
+
+    def test_editar_imagen_none_conserva(self, servicio):
+        p = servicio.crear_pelicula("X", "Drama", 90, "B", 60,
+                                    imagen="data/Carteles/a.png")
+        editado = servicio.editar_pelicula(p.id, "X", "Drama", 90, "B", 60)
+        assert editado.imagen == "data/Carteles/a.png"
+
+    def test_editar_imagen_vacia_borra(self, servicio):
+        p = servicio.crear_pelicula("X", "Drama", 90, "B", 60,
+                                    imagen="data/Carteles/a.png")
+        editado = servicio.editar_pelicula(p.id, "X", "Drama", 90, "B", 60,
+                                           imagen="")
+        assert editado.imagen == ""
+
+    def test_listar_incluye_imagen(self, servicio):
+        servicio.crear_pelicula("X", "Drama", 90, "B", 60)
+        servicio.crear_pelicula("Y", "Drama", 90, "B", 60,
+                                imagen="data/Carteles/b.png")
+        por_titulo = {p.titulo: p.imagen
+                      for p in servicio.listar_peliculas()}
+        assert por_titulo["X"] == ""
+        assert por_titulo["Y"] == "data/Carteles/b.png"
+
+    def test_migracion_agrega_columna_imagen(self, tmp_path):
+        import sqlite3
+        ruta = str(tmp_path / "vieja.db")
+        conn = sqlite3.connect(ruta)
+        # BD con asientos (no se reinicia) pero peliculas sin la columna imagen
+        conn.executescript(
+            "CREATE TABLE peliculas (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "titulo TEXT NOT NULL, genero TEXT NOT NULL, duracion_min "
+            "INTEGER, clasificacion TEXT, precio_base REAL, activa INTEGER "
+            "DEFAULT 1);"
+            "INSERT INTO peliculas (titulo, genero, duracion_min, "
+            "clasificacion, precio_base) VALUES ('Vieja', 'Drama', 90, "
+            "'B', 60);"
+            "CREATE TABLE asientos (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "funcion_id INTEGER NOT NULL, posicion TEXT NOT NULL, fila TEXT "
+            "NOT NULL, numero INTEGER NOT NULL, estado TEXT DEFAULT "
+            "'libre', UNIQUE (funcion_id, posicion));"
+            "INSERT INTO asientos (funcion_id, posicion, fila, numero) "
+            "VALUES (1, 'A-1', 'A', 1), (1, 'A-2', 'A', 2);")
+        conn.commit()
+        conn.close()
+        servicio = CineService(ruta)
+        columnas = [fila["name"] for fila in servicio.conn.execute(
+            "PRAGMA table_info(peliculas)")]
+        assert "imagen" in columnas
+        assert servicio.listar_peliculas(solo_activas=False)[0].imagen == ""
+        # la información previa se conserva (no hubo reseteo)
+        assert [p.titulo for p in
+                servicio.listar_peliculas(solo_activas=False)] == ["Vieja"]
+
+
 class TestReportes:
     def test_reporte_general_suma_totales(self, servicio, escenario_todos):
         _, funcion = escenario_todos

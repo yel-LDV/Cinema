@@ -4,7 +4,10 @@ de cualquier venta y generación de estados de cuenta en PDF.
 
 import re
 import tkinter as tk
+from io import BytesIO
+from tkinter import filedialog
 
+from backend import poster
 from backend.models import (CLASIFICACION_EDAD, ErrorNegocio)
 from backend.pdf_generator import ReporteVentasPDF
 from frontend import theme
@@ -60,6 +63,102 @@ def _precio(var, campo):
         return round(float(var.get().strip()), 2)
     except ValueError:
         raise ErrorNegocio(f"{campo} debe ser un número.") from None
+
+
+def _imagen_cartel(form, fila, win, imagen_actual_ref):
+    """Fila de 'Imagen (cartel)' en un formulario de película.
+
+    Admite dos orígenes: archivo local (filedialog) o link de internet.
+    Devuelve (estado, reset) donde estado["bytes"] guarda el PNG normalizado
+    pendiente de guardar y reset(ruta) limpia la selección y refresca la
+    vista previa de la película seleccionada.
+    """
+    PIL = None
+    ImageTk = None
+    try:
+        from PIL import Image as _IMG, ImageTk as _ITK
+        PIL, ImageTk = _IMG, _ITK
+    except ImportError:
+        pass
+
+    estado = {"bytes": None}
+    tk.Label(form, text="Imagen (cartel)", bg=T["panel"], fg=T["morado"],
+             font=theme.ETIQUETA).grid(row=fila, column=0, sticky="w",
+                                       pady=3)
+    en_link = theme.entrada(form, 24)
+    en_link.grid(row=fila, column=1, sticky="we", padx=6)
+    form.columnconfigure(1, weight=1)
+
+    botones = tk.Frame(form, bg=T["panel"])
+    botones.grid(row=fila + 1, column=0, columnspan=2, sticky="w", padx=6)
+    preview = tk.Frame(form, bg=T["entrada"], height=150,
+                       highlightbackground=T["borde"], highlightthickness=1)
+    preview.grid(row=fila + 2, column=0, columnspan=2, sticky="we",
+                 padx=6, pady=(2, 8))
+    preview.pack_propagate(False)
+
+    def mostrar():
+        for hijo in preview.winfo_children():
+            hijo.destroy()
+        foto = None
+        if estado["bytes"] and PIL:
+            img = PIL.open(BytesIO(estado["bytes"]))
+            img.thumbnail((300, 140))
+            foto = ImageTk.PhotoImage(img)
+        elif imagen_actual_ref["ruta"]:
+            foto = poster.cargar_thumb(imagen_actual_ref["ruta"],
+                                       (300, 140))
+        if foto:
+            lbl = tk.Label(preview, image=foto, bg=T["entrada"])
+            lbl.photo = foto
+            preview._neon_foto = foto  # ref. robusta contra el recolector
+            lbl.place(relx=.5, rely=.5, anchor="center")
+        else:
+            tk.Label(preview, text="Sin imagen: elige un archivo o pega un "
+                     "link de internet", bg=T["entrada"],
+                     fg=T["texto_suave"], font=(theme.FUENTE, 9),
+                     wraplength=320, justify="center").place(
+                relx=.5, rely=.5, anchor="center")
+
+    def de_archivo():
+        ruta = filedialog.askopenfilename(
+            title="Cartel de la película",
+            filetypes=[("Imágenes", "*.png *.jpg *.jpeg *.gif *.webp"),
+                       ("Todos", "*.*")])
+        if not ruta:
+            return
+        try:
+            estado["bytes"] = poster.preparar_origen(ruta)
+            en_link.delete(0, "end")
+            mostrar()
+        except ErrorNegocio as e:
+            estado["bytes"] = None
+            aviso(win, str(e), False)
+
+    def usar_link():
+        origen = en_link.get().strip()
+        if not origen:
+            aviso(win, "Pega primero el link de la imagen.", False)
+            return
+        try:
+            estado["bytes"] = poster.preparar_origen(origen)
+            mostrar()
+        except ErrorNegocio as e:
+            estado["bytes"] = None
+            aviso(win, str(e), False)
+
+    boton = theme.boton(botones, "De archivo", de_archivo, "cian")
+    boton.pack(side="left", padx=(0, 6))
+    theme.boton(botones, "Usar link", usar_link, "cian").pack(side="left")
+
+    def reset(ruta):
+        estado["bytes"] = None
+        en_link.delete(0, "end")
+        imagen_actual_ref["ruta"] = ruta or ""
+        mostrar()
+
+    mostrar()
+    return estado, reset, en_link
 
 
 class AppAdmin(tk.Toplevel):
@@ -141,7 +240,7 @@ class AppAdmin(tk.Toplevel):
         theme.boton(win, "Cerrar", win.destroy, "panel", ancho=14).pack(pady=10)
 
     def _v_alta_pelicula(self):
-        win = self._nueva_ventana("Alta de película", 480, 420)
+        win = self._nueva_ventana("Alta de película", 500, 560)
         form = theme.marco(win, relleno=16)
         form.pack(fill="x", padx=16, pady=12)
 
@@ -162,20 +261,31 @@ class AppAdmin(tk.Toplevel):
             widget.grid(row=i, column=1, sticky="we", padx=6)
         form.columnconfigure(1, weight=1)
 
+        estado_img, reset_img, _ = _imagen_cartel(
+            form, len(campos), win, {"ruta": ""})
+
         def guardar():
             try:
                 p = self.servicio.crear_pelicula(
                     en_titulo.get(), en_genero.get(),
                     _entero(en_duracion, "La duración"),
                     cb_clas.get(), _precio(en_precio, "El precio"))
+                if estado_img["bytes"]:
+                    ruta = poster.volcar_png(estado_img["bytes"],
+                                             f"cartel_{p.id}.png")
+                    self.servicio.editar_pelicula(
+                        p.id, en_titulo.get(), en_genero.get(),
+                        _entero(en_duracion, "La duración"), cb_clas.get(),
+                        _precio(en_precio, "El precio"), imagen=ruta)
                 aviso(win, f"Película '{p.titulo}' dada de alta.", True)
+                reset_img("")
                 for w in (en_titulo, en_genero, en_duracion, en_precio):
                     w.delete(0, "end")
             except (ErrorNegocio, ValueError) as e:
                 aviso(win, str(e), False)
 
         theme.boton(form, "Guardar", guardar, "morado", ancho=16).grid(
-            row=len(campos), column=0, columnspan=2, pady=10)
+            row=len(campos) + 3, column=0, columnspan=2, pady=10)
 
     def _v_baja_pelicula(self):
         win = self._nueva_ventana("Dar de baja película", 480, 300)
@@ -201,7 +311,7 @@ class AppAdmin(tk.Toplevel):
         theme.boton(win, "Dar de baja", hacer, "rojo", ancho=16).pack(pady=6)
 
     def _v_editar_pelicula(self):
-        win = self._nueva_ventana("Editar película", 480, 440)
+        win = self._nueva_ventana("Editar película", 500, 580)
         pelis = self.servicio.listar_peliculas(solo_activas=False)
         if not pelis:
             aviso(win, "No hay películas para editar.")
@@ -227,6 +337,10 @@ class AppAdmin(tk.Toplevel):
             widget.grid(row=i, column=1, sticky="we", padx=6)
         form.columnconfigure(1, weight=1)
 
+        imagen_ref = {"ruta": ""}
+        estado_img, reset_img, _ = _imagen_cartel(form, len(campos), win,
+                                                  imagen_ref)
+
         def elegida(_e=None):
             if not cb.get():
                 return
@@ -243,26 +357,34 @@ class AppAdmin(tk.Toplevel):
             en_duracion.insert(0, str(p.duracion_min))
             en_precio.insert(0, f"{p.precio_base:.2f}")
             cb_clas.set(p.clasificacion)
+            reset_img(p.imagen)
 
         cb.bind("<<ComboboxSelected>>", elegida)
 
         def guardar():
             try:
                 pid = int(cb.get().split("·")[0].strip().lstrip("#"))
+                p0 = self.servicio.obtener_pelicula(pid)
+                imagen = None
+                if estado_img["bytes"]:
+                    imagen = poster.volcar_png(estado_img["bytes"],
+                                               f"cartel_{pid}.png")
                 p = self.servicio.editar_pelicula(
                     pid, en_titulo.get(), en_genero.get(),
                     _entero(en_duracion, "La duración"),
-                    cb_clas.get(), _precio(en_precio, "El precio"))
+                    cb_clas.get(), _precio(en_precio, "El precio"),
+                    imagen=imagen)
                 aviso(win,
                       f"Película '{p.titulo}' actualizada.", True)
                 cb["values"] = [
                     f"#{x.id} · {x.titulo}" for x in
                     self.servicio.listar_peliculas(solo_activas=False)]
+                reset_img(p.imagen or p0.imagen or "")
             except (ErrorNegocio, ValueError) as e:
                 aviso(win, str(e), False)
 
         theme.boton(form, "Guardar cambios", guardar, "morado", ancho=18).grid(
-            row=len(campos), column=0, columnspan=2, pady=10)
+            row=len(campos) + 3, column=0, columnspan=2, pady=10)
 
     # ---------------------------------------------------------------- #
     #                          Funciones                                #
@@ -494,7 +616,6 @@ class AppAdmin(tk.Toplevel):
         theme.aplicar_raiz(win, titulo)
         win.geometry(f"{ancho}x{alto}")
         win.transient(self.raiz)
-        win.grab_set()
         self.ventanas_abiertas.append(win)
         return win
 
