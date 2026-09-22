@@ -48,10 +48,18 @@ class AppUsuario(tk.Toplevel):
         self.raiz = raiz
         self.servicio = servicio
         theme.aplicar_raiz(self, "Cinema · Usuario")
-        self.geometry("1060x760")
+        self._centrar("1060x760")
         self.ventanas_abiertas = []
         self._armar_menu()
+        self.lift()
+        self.focus_force()
         self.protocol("WM_DELETE_WINDOW", self.salir)
+
+    def _centrar(self, dim):
+        ancho, alto = dim.split("x")
+        x = (self.winfo_screenwidth() - int(ancho)) // 2
+        y = (self.winfo_screenheight() - int(alto)) // 3
+        self.geometry(f"{dim}+{x}+{y}")
 
     # ---------------------------------------------------------------- #
     #                              Menú                                 #
@@ -334,7 +342,8 @@ class AppUsuario(tk.Toplevel):
         win = tk.Toplevel(self.raiz)
         theme.aplicar_raiz(win, titulo)
         win.geometry(f"{ancho}x{alto}")
-        win.transient(self.raiz)
+        win.transient(self)
+        win.lift()
         self.ventanas_abiertas.append(win)
         return win
 

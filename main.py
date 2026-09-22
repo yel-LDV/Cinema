@@ -47,6 +47,7 @@ class Lanzador:
 
     def abrir_usuario(self):
         self.ventanas.append(AppUsuario(self.raiz, self.servicio))
+        self.raiz.lower()
 
     def abrir_admin(self):
         self._pedir_login()
@@ -103,6 +104,7 @@ class Lanzador:
 
     def abrir_admin_libre(self):
         self.ventanas.append(AppAdmin(self.raiz, self.servicio))
+        self.raiz.lower()
 
     def ejecutar(self):
         self.raiz.mainloop()

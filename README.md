@@ -115,3 +115,10 @@ Se pueden abrir **varias ventanas de usuario a la vez** (botón *Usuario* del la
 Cubren los bordes de descuentos (12/13/17/18/59/60 años), bloqueo por disponibilidad y clasificación, asientos (ocupados/liberados/al solape), edición de películas (incluida la **imagen**: guardar, conservar, borrar y migración de la columna), guardado de carteles (**archivo, URL, formatos inválidos y links rotos**), unicidad del folio, cancelación/doble cancelación, totales de reportes, autenticación (hash y login) y generación real de PDFs.
 
 > Los directorios `data/`, `tickets/` y `reportes/` se crean en el primer arranque. Si borras `data/cine.db`, el programa vuelve a sembrar un catálogo de ejemplo.
+
+## Solución de problemas
+
+**Bug: al abrir el panel de administración, la pantalla de inicio quedaba encima y los menús "no respondían".**
+
+- **Causa**: los paneles (`AppAdmin`, `AppUsuario`) y sus subventanas son `Toplevel` que no se elevaban sobre la raíz del lanzador; tras cerrarse el diálogo de login (con `grab_set`), el gestor de ventanas devolvía el foco al lanzador y lo apilaba por encima del panel, tapando su columna de menús (los clics caían en el lanzador). Además, `AppAdmin` no tenía dimensiones propias (Tk lo auto-tamañaba según el contenido, desbordando pantallas pequeñas). Es un defecto dependiente del gestor de ventanas, por lo que no se detectaba bajo `xvfb` sin WM.
+- **Solución aplicada**: geometría explícita y centrada en ambos paneles (`_centrar`); `lift()` + `focus_force()` al abrir paneles y subventanas; subventanas ancladas al panel (`transient(self)`) en vez de al lanzador; y `self.raiz.lower()` deja el lanzador siempre por debajo de los paneles (sigue accesible para abrir más ventanas).
