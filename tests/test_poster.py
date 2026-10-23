@@ -9,6 +9,14 @@ from backend import poster
 from backend.models import ErrorNegocio
 
 
+@pytest.fixture(autouse=True)
+def aislar_carteles(tmp_path, monkeypatch):
+    """Evita que las pruebas escriban en data/Carteles del repositorio."""
+    monkeypatch.setattr(poster, "RAIZ", str(tmp_path))
+    monkeypatch.setattr(poster, "CARPETA_CARTELES",
+                        str(tmp_path / "data" / "Carteles"))
+
+
 @pytest.fixture()
 def imagen_png(tmp_path):
     ruta = str(tmp_path / "origen.png")
@@ -62,7 +70,14 @@ class TestValidacion:
         with pytest.raises(ErrorNegocio):
             poster.preparar_origen("ftp://ejemplo.com/a.png")
 
-    def test_url_que_falla_descarga(self):
+    def test_url_que_falla_descarga(self, monkeypatch):
+        import urllib.error
+        import urllib.request
+
+        def falla(*args, **kwargs):
+            raise urllib.error.URLError("sin conexión")
+
+        monkeypatch.setattr(urllib.request, "urlopen", falla)
         with pytest.raises(ErrorNegocio):
             poster.preparar_origen(
                 "https://no-existe.dominio.invalido.falso/cartel.png")

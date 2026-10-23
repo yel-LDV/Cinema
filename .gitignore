@@ -7,3 +7,5 @@ tickets/
 reportes/
 *.pdf
 *.db
+.env
+*.log

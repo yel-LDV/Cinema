@@ -83,33 +83,37 @@ class TestAsientos:
         assert asientos[9]["fila"] == "B" and asientos[10]["fila"] == "B"
         assert asientos[19]["fila"] == "C" and asientos[19]["numero"] == 4
 
-    def test_migracion_crea_asientos_faltantes(self, tmp_path):
-        servicio = CineService(str(tmp_path / "m.db"))
-        peli = servicio.crear_pelicula("M", "Drama", 90, "B", 50)
-        with servicio.conn:  # función vieja creada directamente sin asientos
-            cur = servicio.conn.execute(
-                "INSERT INTO funciones (pelicula_id, sala, horario, "
-                "capacidad, ocupados) VALUES (?, ?, ?, ?, 0)",
-                (peli.id, "Sala 9", "09:00", 40))
-            funcion_id = cur.lastrowid
-        nuevo = CineService(str(tmp_path / "m.db"))
-        assert len(nuevo.listar_asientos(funcion_id)) == 40
+    def test_asientos_fisicos_se_comparten_entre_funciones(self, servicio,
+                                                          escenario):
+        pelicula, f1 = escenario
+        f2 = servicio.crear_funcion(pelicula.id, "Sala 1", "22:00", 5)
+        a1 = servicio.listar_asientos(f1.id)
+        a2 = servicio.listar_asientos(f2.id)
+        assert [a["id"] for a in a1] == [a["id"] for a in a2]
+        total = servicio.conn.execute(
+            "SELECT COUNT(*) AS n FROM asientos WHERE sala_id = "
+            "(SELECT sala_id FROM funciones WHERE id = ?)",
+            (f1.id,)).fetchone()["n"]
+        assert total == 5
 
-    def test_bd_legada_sin_asientos_se_reinicia(self, tmp_path):
-        import sqlite3
-        ruta = str(tmp_path / "legacy.db")
-        conn = sqlite3.connect(ruta)
-        conn.executescript(
-            "CREATE TABLE peliculas (id INTEGER PRIMARY KEY, titulo TEXT);"
-            "INSERT INTO peliculas (id, titulo) VALUES (1, 'Vieja');")
-        conn.commit()
-        conn.close()
-        servicio = CineService(ruta)
-        assert servicio.listar_peliculas(solo_activas=False) == []
-        tabla = servicio.conn.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table' "
-            "AND name = 'asientos'").fetchone()
-        assert tabla[0] == "asientos"
+    def test_esquema_normalizado_no_guarda_derivados(self, servicio):
+        tablas = {f["name"] for f in servicio.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'")}
+        assert {"generos", "clasificaciones", "salas", "asientos",
+                "peliculas", "funciones", "clientes", "descuentos",
+                "estados_venta", "ventas", "boletos"} <= tablas
+        columnas_funciones = {f["name"] for f in servicio.conn.execute(
+            "PRAGMA table_info(funciones)")}
+        assert "ocupados" not in columnas_funciones
+        assert "capacidad" not in columnas_funciones
+        columnas_ventas = {f["name"] for f in servicio.conn.execute(
+            "PRAGMA table_info(ventas)")}
+        assert "total" not in columnas_ventas
+        assert "cantidad_boletos" not in columnas_ventas
+        columnas_asientos = {f["name"] for f in servicio.conn.execute(
+            "PRAGMA table_info(asientos)")}
+        assert "estado" not in columnas_asientos
+        assert "posicion" not in columnas_asientos
 
 
 class TestComprar:
@@ -358,35 +362,19 @@ class TestImagenPelicula:
         assert por_titulo["X"] == ""
         assert por_titulo["Y"] == "data/Carteles/b.png"
 
-    def test_migracion_agrega_columna_imagen(self, tmp_path):
-        import sqlite3
-        ruta = str(tmp_path / "vieja.db")
-        conn = sqlite3.connect(ruta)
-        # BD con asientos (no se reinicia) pero peliculas sin la columna imagen
-        conn.executescript(
-            "CREATE TABLE peliculas (id INTEGER PRIMARY KEY AUTOINCREMENT, "
-            "titulo TEXT NOT NULL, genero TEXT NOT NULL, duracion_min "
-            "INTEGER, clasificacion TEXT, precio_base REAL, activa INTEGER "
-            "DEFAULT 1);"
-            "INSERT INTO peliculas (titulo, genero, duracion_min, "
-            "clasificacion, precio_base) VALUES ('Vieja', 'Drama', 90, "
-            "'B', 60);"
-            "CREATE TABLE asientos (id INTEGER PRIMARY KEY AUTOINCREMENT, "
-            "funcion_id INTEGER NOT NULL, posicion TEXT NOT NULL, fila TEXT "
-            "NOT NULL, numero INTEGER NOT NULL, estado TEXT DEFAULT "
-            "'libre', UNIQUE (funcion_id, posicion));"
-            "INSERT INTO asientos (funcion_id, posicion, fila, numero) "
-            "VALUES (1, 'A-1', 'A', 1), (1, 'A-2', 'A', 2);")
-        conn.commit()
-        conn.close()
-        servicio = CineService(ruta)
-        columnas = [fila["name"] for fila in servicio.conn.execute(
-            "PRAGMA table_info(peliculas)")]
-        assert "imagen" in columnas
-        assert servicio.listar_peliculas(solo_activas=False)[0].imagen == ""
-        # la información previa se conserva (no hubo reseteo)
-        assert [p.titulo for p in
-                servicio.listar_peliculas(solo_activas=False)] == ["Vieja"]
+    def test_catalogos_sembrados(self, servicio):
+        clasificaciones = servicio.conn.execute(
+            "SELECT codigo, edad_minima FROM clasificaciones "
+            "ORDER BY codigo").fetchall()
+        assert len(clasificaciones) == 7
+        assert ("B15", 15) in [(f["codigo"], f["edad_minima"])
+                               for f in clasificaciones]
+        descuentos = servicio.conn.execute(
+            "SELECT COUNT(*) AS n FROM descuentos").fetchone()["n"]
+        estados = servicio.conn.execute(
+            "SELECT COUNT(*) AS n FROM estados_venta").fetchone()["n"]
+        assert descuentos == 4
+        assert estados == 2
 
 
 class TestReportes:

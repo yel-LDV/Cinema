@@ -4,8 +4,10 @@ está vacía) un catálogo de ejemplo.
 """
 
 import tkinter as tk
+from tkinter import messagebox
 
 from backend.auth import validar_login
+from backend.database import ErrorConexion
 from backend.models import CineService, sembrar_demo
 from frontend import theme
 from frontend.app_usuario import AppUsuario
@@ -111,7 +113,16 @@ class Lanzador:
 
 
 def main():
-    Lanzador().ejecutar()
+    try:
+        Lanzador().ejecutar()
+    except ErrorConexion as e:
+        try:
+            raiz = tk.Tk()
+            raiz.withdraw()
+            messagebox.showerror("Cinema · Base de datos", str(e))
+            raiz.destroy()
+        except tk.TclError:
+            print(f"Error de base de datos: {e}")
 
 
 if __name__ == "__main__":
